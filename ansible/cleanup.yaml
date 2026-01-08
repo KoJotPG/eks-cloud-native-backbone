@@ -1,0 +1,54 @@
+---
+- name: "Cleanup: Safely remove EKS Load Balancers and Addons"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - inventory.yaml
+
+  tasks:
+    - name: "Update kubeconfig"
+      ansible.builtin.shell: "aws eks update-kubeconfig --name {{ cluster_name }} --region {{ region }}"
+      changed_when: false
+
+    - name: "Remove Let's Encrypt ClusterIssuer"
+      kubernetes.core.k8s:
+        state: absent
+        definition:
+          apiVersion: cert-manager.io/v1
+          kind: ClusterIssuer
+          metadata:
+            name: letsencrypt-prod
+      ignore_errors: true
+
+    - name: "Uninstall Helm Addons"
+      kubernetes.core.helm:
+        name: "{{ item.name }}"
+        release_namespace: "{{ item.namespace }}"
+        state: absent
+        wait: true
+      loop:
+        - { name: 'prometheus-stack', namespace: 'monitoring' }
+        - { name: 'argocd', namespace: 'argocd' }
+        - { name: 'ingress-nginx', namespace: 'ingress-nginx' } # This triggers AWS NLB deletion
+        - { name: 'cert-manager', namespace: 'cert-manager' }
+        - { name: 'metrics-server', namespace: 'kube-system' }
+      ignore_errors: true
+
+    - name: "Delete Namespaces"
+      kubernetes.core.k8s:
+        name: "{{ item }}"
+        kind: Namespace
+        state: absent
+      loop:
+        - monitoring
+        - argocd
+        - ingress-nginx
+        - cert-manager
+      ignore_errors: true
+
+    - name: "Wait for AWS Load Balancers to be fully decommissioned"
+      # Giving AWS time to cleanup the Network Load Balancer and its Target Groups
+      ansible.builtin.pause:
+        minutes: 2

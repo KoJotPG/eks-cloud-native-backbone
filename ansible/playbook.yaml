@@ -1,0 +1,21 @@
+---
+- name: "Post-Deployment: EKS Cluster Configuration"
+  hosts: localhost
+  gather_facts: false
+
+  pre_tasks:
+    - name: "Ensure official Helm binary is installed"
+      # This ensures the environment is ready regardless of pre-installed snap/apt versions
+      ansible.builtin.shell: |
+        if ! [ -x "/usr/local/bin/helm" ]; then
+          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+        fi
+      args:
+        creates: /usr/local/bin/helm
+
+  tasks:
+    - name: "Initialize Kubernetes connection"
+      include_tasks: tasks/k8s_init.yaml
+
+    - name: "Install essential cluster addons"
+      include_tasks: tasks/addons.yaml

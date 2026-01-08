@@ -1,0 +1,111 @@
+---
+# Add official Helm repositories for backbone services
+- name: "Add Helm repositories"
+  kubernetes.core.helm_repository:
+    name: "{{ item.name }}"
+    repo_url: "{{ item.url }}"
+  loop:
+    - { name: 'metrics-server', url: 'https://kubernetes-sigs.github.io/metrics-server/' }
+    - { name: 'ingress-nginx', url: 'https://kubernetes.github.io/ingress-nginx' }
+    - { name: 'argo', url: 'https://argoproj.github.io/argo-helm' }
+    - { name: 'jetstack', url: 'https://charts.jetstack.io' }
+    - { name: 'prometheus-community', url: 'https://prometheus-community.github.io/helm-charts' }
+
+# Deployment of the Metrics Server for resource monitoring
+- name: "Install Metrics Server"
+  kubernetes.core.helm:
+    name: metrics-server
+    chart_ref: metrics-server/metrics-server
+    release_namespace: kube-system
+    wait: true
+    wait_timeout: "300s"
+
+# Deployment of NGINX Ingress Controller with AWS NLB integration
+- name: "Install NGINX Ingress Controller"
+  kubernetes.core.helm:
+    name: ingress-nginx
+    chart_ref: ingress-nginx/ingress-nginx
+    release_namespace: ingress-nginx
+    create_namespace: true
+    wait: true
+    wait_timeout: "600s" # Longer timeout to allow AWS NLB provisioning
+    values:
+      controller:
+        service:
+          annotations:
+            # Provision a high-performance AWS Network Load Balancer
+            service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+        nodeSelector:
+          Capability: "ManagedSpotNodes"
+
+# Deployment of Cert-manager for SSL/TLS certificates
+- name: "Install Cert-manager"
+  kubernetes.core.helm:
+    name: cert-manager
+    chart_ref: jetstack/cert-manager
+    release_namespace: cert-manager
+    create_namespace: true
+    wait: true
+    wait_timeout: "300s"
+    values:
+      installCRDs: true
+      nodeSelector:
+        Capability: "ManagedSpotNodes"
+
+# Configuration of ClusterIssuer for Let's Encrypt (Production)
+- name: "Create Let's Encrypt ClusterIssuer"
+  # Depends on Cert-manager being ready
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: cert-manager.io/v1
+      kind: ClusterIssuer
+      metadata:
+        name: letsencrypt-prod
+      spec:
+        acme:
+          server: https://acme-v02.api.letsencrypt.org/directory
+          email: "{{ acme_email }}"
+          privateKeySecretRef:
+            name: letsencrypt-prod-account-key
+          solvers:
+            - http01:
+                ingress:
+                  class: nginx
+
+# ArgoCD for GitOps-based Continuous Delivery
+- name: "Install ArgoCD"
+  kubernetes.core.helm:
+    name: argocd
+    chart_ref: argo/argo-cd
+    release_namespace: argocd
+    create_namespace: true
+    wait: true
+    wait_timeout: "400s"
+    values:
+      server:
+        service:
+          type: ClusterIP
+      nodeSelector:
+        Capability: "ManagedSpotNodes"
+
+# Kube-Prometheus-Stack (Prometheus & Grafana)
+- name: "Install Prometheus Stack"
+  kubernetes.core.helm:
+    name: prometheus-stack
+    chart_ref: prometheus-community/kube-prometheus-stack
+    release_namespace: monitoring
+    create_namespace: true
+    wait: true
+    wait_timeout: "600s"
+    values:
+      grafana:
+        nodeSelector:
+          Capability: "ManagedSpotNodes"
+        adminPassword: "admin" # Replace with a secure password or secret in production
+      prometheus:
+        prometheusSpec:
+          nodeSelector:
+            Capability: "ManagedSpotNodes"
+          # Retention policy: how long to keep the data
+          retention: 2d

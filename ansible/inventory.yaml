@@ -1,0 +1,10 @@
+all:
+  vars:
+    # Cluster identification for AWS CLI and Helm
+    cluster_name: "eks-cloud-native-backbone"
+    region: "eu-central-1"
+    acme_email: "your-email@example.com" # Email for Let's Encrypt notifications
+    ansible_helm_executable: /usr/local/bin/helm
+  hosts:
+    localhost:
+      ansible_connection: local
